@@ -5,36 +5,63 @@ import markdownify
 import re
 import os
 import sys
-
 def convert_html_to_markdown(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
-    
-    # 提取Front Matter头部信息
-    title = soup.find('h1', class_='posttitle').get_text(strip=True) if soup.find('h1', class_='posttitle') else 'Untitled'
-    date_element = soup.find('time', {'class': 'dt-published'})
-    date = date_element['datetime'] if date_element else ''
-    tags = [tag.get_text(strip=True) for tag in soup.find_all('a', class_='p-category', rel='tag')]
-    
-    # 构建YAML Front Matter
-    front_matter = "---\n"
-    front_matter += f"title: {title}\n"
-    front_matter += f"date: {date}\n"
-    if tags:
-        front_matter += f"tags: [{', '.join(tags)}]\n"
-    front_matter += "---\n\n"
-    
+
+    # 提取标题
+    title_tag = soup.find('h1', class_='post-title')
+    title = title_tag.get_text(strip=True) if title_tag else 'Untitled'
+
+    # 提取日期（从 title 属性里截取创建时间）
+    date_tag = soup.find('time', itemprop='dateCreated datePublished')
+    date = ''
+    if date_tag and date_tag.has_attr('title'):
+        match = re.search(r'创建时间：([0-9:\- ]+)', date_tag['title'])
+        if match:
+            date = match.group(1)
+
+    # 提取分类
+    category_tags = soup.select('span[itemprop="about"] a span[itemprop="name"]')
+    categories = [c.get_text(strip=True) for c in category_tags]
+
+    # 提取标签
+    tag_tags = soup.select('div.post-tags a[rel="tag"]')
+    tags = [t.get_text(strip=True).lstrip('#').strip() for t in tag_tags]
+
     # 提取文章主体
-    article = soup.find('article', class_='post')
+    article = soup.find('div', class_='post-body')
     if not article:
         log_text.insert(tk.END, "错误: 未找到文章主体\n")
         return None
-    
+
+    # 新增核心逻辑：修改 img 标签的 src 属性
+    for img in article.find_all('img', attrs={'data-src': True}):
+        # 获取完整的 URL
+        full_src = img['data-src']
+        # 提取文件名
+        file_name = full_src.split('/')[-1]
+        # 将 img 标签的 data-src 属性值替换为文件名
+        # 这会影响 markdownify 的转换结果
+        img['data-src'] = file_name
+        
+    # 构建 YAML Front Matter
+    front_matter = "---\n"
+    front_matter += f"title: {title}\n"
+    if date:
+        front_matter += f"date: {date}\n"
+    if categories:
+        front_matter += f"categories: [{', '.join(categories)}]\n"
+    if tags:
+        front_matter += f"tags: [{', '.join(tags)}]\n"
+    front_matter += f"typora-root-url: {title}\n"
+    front_matter += "---\n\n"
+
     # 清理导航栏、页脚等无关元素
     for element in article.find_all(['header', 'footer', 'div', 'span', 'ul', 'li']):
         if element.find_parents(['header', 'footer', 'nav']):
             element.decompose()
-    
-    # 处理Hexo的highlight代码块
+
+    # 处理 Hexo 的 highlight 代码块
     for figure in article.find_all('figure', class_='highlight'):
         language_classes = [cls for cls in figure.get('class', []) if cls != 'highlight']
         language = language_classes[0] if language_classes else ''
@@ -48,7 +75,7 @@ def convert_html_to_markdown(html_content):
             code_block = f"\n```{language}\n{code_content}\n```\n"
             figure.replace_with(code_block)
     
-    # 处理常规pre代码块
+    # 处理常规 pre 代码块
     for pre in article.find_all('pre'):
         if pre.find_parent('figure', class_='highlight'):
             continue
@@ -65,7 +92,8 @@ def convert_html_to_markdown(html_content):
         else:
             pre.replace_with(f"\n```\n{pre.get_text()}\n```\n")
     
-    # 转换剩余HTML为Markdown
+    # 转换剩余 HTML 为 Markdown
+    # 因为 img 标签的 data-src 属性已经被修改，markdownify 会使用新的路径
     markdown_body = markdownify.markdownify(str(article), heading_style="ATX")
     full_markdown = front_matter + re.sub(r'\n{3,}', '\n\n', markdown_body.strip())
     return full_markdown
@@ -276,4 +304,5 @@ def main():
         error_root.mainloop()
 
 if __name__ == "__main__":
+
     main()
