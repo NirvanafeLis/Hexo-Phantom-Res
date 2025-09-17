@@ -5,6 +5,9 @@ import markdownify
 import re
 import os
 import sys
+# 假设你已经定义了 log_text 和其他必要的 Tkinter 元素，
+# 如果没有，请将所有 log_text.insert() 行删除或注释掉
+
 def convert_html_to_markdown(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
 
@@ -12,7 +15,7 @@ def convert_html_to_markdown(html_content):
     title_tag = soup.find('h1', class_='post-title')
     title = title_tag.get_text(strip=True) if title_tag else 'Untitled'
 
-    # 提取日期（从 title 属性里截取创建时间）
+    # 提取日期
     date_tag = soup.find('time', itemprop='dateCreated datePublished')
     date = ''
     if date_tag and date_tag.has_attr('title'):
@@ -31,19 +34,24 @@ def convert_html_to_markdown(html_content):
     # 提取文章主体
     article = soup.find('div', class_='post-body')
     if not article:
-        log_text.insert(tk.END, "错误: 未找到文章主体\n")
+        # 确保有日志处理，或者直接返回
         return None
 
-    # 新增核心逻辑：修改 img 标签的 src 属性
-    for img in article.find_all('img', attrs={'data-src': True}):
-        # 获取完整的 URL
-        full_src = img['data-src']
-        # 提取文件名
-        file_name = full_src.split('/')[-1]
-        # 将 img 标签的 data-src 属性值替换为文件名
-        # 这会影响 markdownify 的转换结果
-        img['data-src'] = file_name
-        
+    # 核心修复逻辑：处理图片标签
+    for img in article.find_all('img'):
+        # 优先使用 data-src，如果存在的话
+        if 'data-src' in img.attrs:
+            # 提取文件名
+            file_name = img['data-src'].split('/')[-1]
+            # 创建或更新 src 属性为文件名
+            img['src'] = file_name
+            # 删除 data-src 属性，避免干扰
+            del img['data-src']
+        elif 'src' in img.attrs:
+            # 如果没有 data-src，就处理 src 属性
+            file_name = img['src'].split('/')[-1]
+            img['src'] = file_name
+
     # 构建 YAML Front Matter
     front_matter = "---\n"
     front_matter += f"title: {title}\n"
@@ -56,21 +64,18 @@ def convert_html_to_markdown(html_content):
     front_matter += f"typora-root-url: {title}\n"
     front_matter += "---\n\n"
 
-    # 清理导航栏、页脚等无关元素
+    # 清理无关元素
     for element in article.find_all(['header', 'footer', 'div', 'span', 'ul', 'li']):
         if element.find_parents(['header', 'footer', 'nav']):
             element.decompose()
 
-    # 处理 Hexo 的 highlight 代码块
+    # 处理 Hexo highlight 代码块
     for figure in article.find_all('figure', class_='highlight'):
         language_classes = [cls for cls in figure.get('class', []) if cls != 'highlight']
         language = language_classes[0] if language_classes else ''
-        
-        code_lines = []
         pre = figure.find('pre')
         if pre:
-            for line in pre.find_all('span', class_='line'):
-                code_lines.append(line.get_text().replace('\n', ''))
+            code_lines = [line.get_text().replace('\n', '') for line in pre.find_all('span', class_='line')]
             code_content = '\n'.join(code_lines)
             code_block = f"\n```{language}\n{code_content}\n```\n"
             figure.replace_with(code_block)
@@ -79,24 +84,19 @@ def convert_html_to_markdown(html_content):
     for pre in article.find_all('pre'):
         if pre.find_parent('figure', class_='highlight'):
             continue
-            
         code = pre.find('code')
         if code:
-            language = ''
-            for cls in code.get('class', []):
-                if cls.startswith('language-'):
-                    language = cls.split('-')[1]
-                    break
-            code_block = f"\n```{language}\n{code.get_text()}\n```\n"
-            pre.replace_with(code_block)
+            language = next((cls.split('-')[1] for cls in code.get('class', []) if cls.startswith('language-')), '')
+            pre.replace_with(f"\n```{language}\n{code.get_text()}\n```\n")
         else:
             pre.replace_with(f"\n```\n{pre.get_text()}\n```\n")
     
     # 转换剩余 HTML 为 Markdown
-    # 因为 img 标签的 data-src 属性已经被修改，markdownify 会使用新的路径
     markdown_body = markdownify.markdownify(str(article), heading_style="ATX")
     full_markdown = front_matter + re.sub(r'\n{3,}', '\n\n', markdown_body.strip())
     return full_markdown
+
+
 
 def select_source_directory():
     source_dir = filedialog.askdirectory()
@@ -306,3 +306,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
